@@ -2,6 +2,7 @@ import numpy as np
 import os
 import sys
 import re
+import csv
 from collections import Counter, defaultdict
 from datetime import datetime
 from urllib.parse import unquote
@@ -198,43 +199,56 @@ def classify_severity(idx):
     is_destructive = any(kw in url_lower for kw in DESTRUCTIVE_KEYWORDS)
 
     if status == 200 and is_destructive:
-        return "🔴 CRITICAL : Destructive SQLi Possibly Executed"
+        return "CRITICAL", "Destructive SQLi Possibly Executed"
     if status == 200 and (sqli_kw > 0 or sqli_chars > 3):
-        return "🔴 CRITICAL : Possible Successful SQLi Breach"
+        return "CRITICAL", "Possible Successful SQLi Breach"
     if bad_ua and status == 200 and sensitive:
-        return "🔴 CRITICAL : Attack Tool Reached Sensitive Endpoint"
+        return "CRITICAL", "Attack Tool Reached Sensitive Endpoint"
     if sqli_kw > 0 and bad_ua:
-        return "🟠 HIGH     : SQLi Attempt by Known Attack Tool"
+        return "HIGH", "SQLi Attempt by Known Attack Tool"
     if ip_rate > 30:
         if sqli_kw > 0 or sqli_chars > 2:
-            return "🟠 HIGH     : Brute Force + SQLi Combo Attack"
-        return "🟠 HIGH     : Brute Force Pattern Detected"
+            return "HIGH", "Brute Force + SQLi Combo Attack"
+        return "HIGH", "Brute Force Pattern Detected"
     if sqli_kw > 0 or sqli_chars > 4:
-        return "🟡 MEDIUM   : SQLi Attempt (Server Blocked)"
+        return "MEDIUM", "SQLi Attempt (Server Blocked)"
     if bad_ua:
-        return "🟡 MEDIUM   : Known Attack Tool Detected"
+        return "MEDIUM", "Known Attack Tool Detected"
     if sensitive and status in (200, 301, 302):
-        return "🟠 HIGH     : Sensitive Path Accessed Successfully"
+        return "HIGH", "Sensitive Path Accessed Successfully"
 
-    return "🔵 LOW      : Suspected Anomaly"
+    return "LOW", "Suspected Anomaly"
 
 # ---------------------------------------------------------------------------
 # 8) Report top 10 anomalies
 # ---------------------------------------------------------------------------
 TOP_N       = 10
 top_indices = np.argsort(anomaly_scores)[-TOP_N:][::-1]
+output_csv  = os.path.join(script_dir, 'anomalies_output.csv')
 
 print(f"\n{'─'*70}")
 print(f"  Final Results — Top {TOP_N} Detected Anomalies")
+print(f"  Results saved to: {output_csv}")
 print(f"{'─'*70}\n")
 
-for rank, i in enumerate(top_indices, 1):
-    score    = anomaly_scores[i]
-    severity = classify_severity(i)
-    print(f"Rank {rank:>2} | Line {i+1:<5} | Score: {score:.4f}")
-    print(f"         {severity}")
-    print(f"         {raw_logs[i].strip()}")
-    print()
+with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
+    csvwriter = csv.writer(csvfile)
+    csvwriter.writerow(['Rank', 'Line', 'Score', 'Severity', 'Description', 'Raw Log'])
+
+    emoji_map = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵"}
+
+    for rank, i in enumerate(top_indices, 1):
+        score    = anomaly_scores[i]
+        severity, desc = classify_severity(i)
+        raw_log  = raw_logs[i].strip()
+        emoji    = emoji_map.get(severity, "🔵")
+        
+        print(f"Rank {rank:>2} | Line {i+1:<5} | Score: {score:.4f}")
+        print(f"         {emoji} {severity:<8} : {desc}")
+        print(f"         {raw_log}")
+        print()
+        
+        csvwriter.writerow([rank, i+1, f"{score:.4f}", severity, desc, raw_log])
 
 print(f"{'─'*70}")
 print(f"Feature legend: [status, size, sqli_chars, sqli_kw_hits, url_len,")
